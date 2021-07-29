@@ -8,6 +8,7 @@ import math
 from .. import InputExample
 import numpy as np
 
+
 class ContrastiveTensionLoss(nn.Module):
     """
         This loss expects as input a batch consisting of multiple mini-batches of sentence pairs (a_1, p_1), (a_2, p_2)..., (a_{K+1}, p_{K+1})
@@ -20,33 +21,54 @@ class ContrastiveTensionLoss(nn.Module):
         For more information, see: https://openreview.net/pdf?id=Ov_sMNau-PF
 
     """
+
     def __init__(self, model: SentenceTransformer):
         """
         :param model: SentenceTransformer model
         """
         super(ContrastiveTensionLoss, self).__init__()
-        self.model2 = model  # This will be the final model used during the inference time.
+        # This will be the final model used during the inference time.
+        self.model2 = model
         self.model1 = copy.deepcopy(model)
         self.criterion = nn.BCEWithLogitsLoss(reduction='sum')
 
     def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
         sentence_features1, sentence_features2 = tuple(sentence_features)
-        reps_1 = self.model1(sentence_features1)['sentence_embedding']  # (bsz, hdim)
+        reps_1 = self.model1(sentence_features1)[
+            'sentence_embedding']  # (bsz, hdim)
         reps_2 = self.model2(sentence_features2)['sentence_embedding']
 
-        sim_scores = torch.matmul(reps_1[:,None], reps_2[:,:,None]).squeeze(-1).squeeze(-1)  # (bsz,) dot product, i.e. S1S2^T
+        # (bsz,) dot product, i.e. S1S2^T
+        sim_scores = torch.matmul(
+            reps_1[:, None], reps_2[:, :, None]).squeeze(-1).squeeze(-1)
 
         loss = self.criterion(sim_scores, labels.type_as(sim_scores))
         return loss
 
 
+class Projector(nn.Module):
+    def __init__(self, dim_in):
+        super(Projector, self).__init__()
+        self.intermediate_dim = 764
+        self.final_dim = 764
+        self.projector = nn.Sequential(
+            nn.Linear(dim_in, self.intermediate_dim),
+            nn.ReLU(),
+            nn.Linear(self.intermediate_dim, self.final_dim)
+        )
+
+    def forward(self, inputs):
+        return self.projector(inputs)
+
+
 class ContrastiveTensionLossInBatchNegatives(nn.Module):
-    def __init__(self, model: SentenceTransformer, scale: float = 20.0, similarity_fct = util.cos_sim):
+    def __init__(self, model: SentenceTransformer, scale: float = 20.0, similarity_fct=util.cos_sim):
         """
         :param model: SentenceTransformer model
         """
         super(ContrastiveTensionLossInBatchNegatives, self).__init__()
-        self.model2 = model  # This will be the final model used during the inference time.
+        # This will be the final model used during the inference time.
+        self.model2 = model
         self.model1 = copy.deepcopy(model)
         self.similarity_fct = similarity_fct
         self.cross_entropy_loss = nn.CrossEntropyLoss()
@@ -55,17 +77,48 @@ class ContrastiveTensionLossInBatchNegatives(nn.Module):
 
     def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
         sentence_features1, sentence_features2 = tuple(sentence_features)
-        embeddings_a = self.model1(sentence_features1)['sentence_embedding']  # (bsz, hdim)
+        embeddings_a = self.model1(sentence_features1)[
+            'sentence_embedding']  # (bsz, hdim)
         embeddings_b = self.model2(sentence_features2)['sentence_embedding']
 
-        scores = self.similarity_fct(embeddings_a, embeddings_b) * self.logit_scale.exp()  #self.scale
-        labels = torch.tensor(range(len(scores)), dtype=torch.long, device=scores.device)
+        scores = self.similarity_fct(
+            embeddings_a, embeddings_b) * self.logit_scale.exp()  # self.scale
+        labels = torch.tensor(range(len(scores)),
+                              dtype=torch.long, device=scores.device)
+        return (self.cross_entropy_loss(scores, labels) + self.cross_entropy_loss(scores.t(), labels))/2
+
+
+class ContrastiveTensionLossWithProjector(nn.Module):
+    def __init__(self, model: SentenceTransformer, scale: float = 20.0, similarity_fct=util.cos_sim):
+        """
+        :param model: SentenceTransformer model
+        """
+        super(ContrastiveTensionLossInBatchNegatives, self).__init__()
+        # This will be the final model used during the inference time.
+        self.model2 = model
+        self.model1 = copy.deepcopy(model)
+        self.similarity_fct = similarity_fct
+        self.cross_entropy_loss = nn.CrossEntropyLoss()
+        #self.scale = scale
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(scale))
+
+    def forward(self, sentence_features: Iterable[Dict[str, Tensor]], labels: Tensor):
+        sentence_features1, sentence_features2 = tuple(sentence_features)
+        embeddings_a = self.model1(sentence_features1)[
+            'sentence_embedding']  # (bsz, hdim)
+        embeddings_b = self.model2(sentence_features2)['sentence_embedding']
+
+        scores = self.similarity_fct(
+            embeddings_a, embeddings_b) * self.logit_scale.exp()  # self.scale
+        labels = torch.tensor(range(len(scores)),
+                              dtype=torch.long, device=scores.device)
         return (self.cross_entropy_loss(scores, labels) + self.cross_entropy_loss(scores.t(), labels))/2
 
 ################# CT Data Loader #################
 # For CT, we need batches in a specific format
 # In each batch, we have one positive pair (i.e. [sentA, sentA]) and 7 negative pairs (i.e. [sentA, sentB]).
 # To achieve this, we create a custom DataLoader that produces batches with this property
+
 
 class ContrastiveTensionDataLoader:
     def __init__(self, sentences, batch_size, pos_neg_ratio=8):
@@ -75,7 +128,8 @@ class ContrastiveTensionDataLoader:
         self.collate_fn = None
 
         if self.batch_size % self.pos_neg_ratio != 0:
-            raise ValueError(f"ContrastiveTensionDataLoader was loaded with a pos_neg_ratio of {pos_neg_ratio} and a batch size of {batch_size}. The batch size must be devisable by the pos_neg_ratio")
+            raise ValueError(
+                f"ContrastiveTensionDataLoader was loaded with a pos_neg_ratio of {pos_neg_ratio} and a batch size of {batch_size}. The batch size must be devisable by the pos_neg_ratio")
 
     def __iter__(self):
         random.shuffle(self.sentences)
@@ -84,11 +138,11 @@ class ContrastiveTensionDataLoader:
 
         while sentence_idx + 1 < len(self.sentences):
             s1 = self.sentences[sentence_idx]
-            if len(batch) % self.pos_neg_ratio > 0:    #Negative (different) pair
+            if len(batch) % self.pos_neg_ratio > 0:  # Negative (different) pair
                 sentence_idx += 1
                 s2 = self.sentences[sentence_idx]
                 label = 0
-            else:   #Positive (identical pair)
+            else:  # Positive (identical pair)
                 s2 = self.sentences[sentence_idx]
                 label = 1
 
