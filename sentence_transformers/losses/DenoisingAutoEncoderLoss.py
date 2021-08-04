@@ -24,7 +24,8 @@ class DenoisingAutoEncoderLoss(nn.Module):
             self,
             model: SentenceTransformer,
             decoder_name_or_path: str = None,
-            tie_encoder_decoder: bool = True
+            tie_encoder_decoder: bool = True,
+            tokenizer_name: str = None,
     ):
         """
         :param model: SentenceTransformer model
@@ -43,7 +44,14 @@ class DenoisingAutoEncoderLoss(nn.Module):
                 logger.warning('When tie_encoder_decoder=True, the decoder_name_or_path will be invalid.')
             decoder_name_or_path = encoder_name_or_path
 
-        self.tokenizer_decoder = AutoTokenizer.from_pretrained(decoder_name_or_path)
+        if tokenizer_name is None :
+            decoder_tokenizer_name = decoder_name_or_path
+            encoder_tokenizer_name = encoder_name_or_path
+        else :
+            decoder_tokenizer_name = tokenizer_name
+            encoder_tokenizer_name = tokenizer_name
+
+        self.tokenizer_decoder = AutoTokenizer.from_pretrained(decoder_tokenizer_name)
         self.need_retokenization = not (type(self.tokenizer_encoder) == type(self.tokenizer_decoder))
 
         decoder_config = AutoConfig.from_pretrained(decoder_name_or_path)
@@ -61,7 +69,7 @@ class DenoisingAutoEncoderLoss(nn.Module):
             self.tokenizer_decoder.pad_token = self.tokenizer_decoder.eos_token
             self.decoder.config.pad_token_id = self.decoder.config.eos_token_id
 
-        if len(AutoTokenizer.from_pretrained(encoder_name_or_path)) != len(self.tokenizer_encoder):
+        if len(AutoTokenizer.from_pretrained(encoder_tokenizer_name)) != len(self.tokenizer_encoder):
             logger.warning('WARNING: The vocabulary of the encoder has been changed. One might need to change the decoder vocabulary, too.')
 
         if tie_encoder_decoder:
