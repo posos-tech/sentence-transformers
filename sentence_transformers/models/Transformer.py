@@ -21,19 +21,23 @@ class Transformer(nn.Module):
     def __init__(self, model_name_or_path: str, max_seq_length: Optional[int] = None,
                  model_args: Dict = {}, cache_dir: Optional[str] = None,
                  tokenizer_args: Dict = {}, do_lower_case: bool = False,
-                 tokenizer_name_or_path: str = None):
+                 tokenizer_name_or_path: str = None,
+                 is_huggingface_ckpt: bool = False):
         super(Transformer, self).__init__()
         self.config_keys = ['max_seq_length', 'do_lower_case']
         self.do_lower_case = do_lower_case
 
         config = AutoConfig.from_pretrained(
             model_name_or_path, **model_args, cache_dir=cache_dir)
+        model_name = config.name_or_path
         self.auto_model = AutoModel.from_pretrained(
             model_name_or_path, config=config, cache_dir=cache_dir)
+
+        if is_huggingface_ckpt:
+            tokenizer_name_or_path = model_name
+
         self.tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_name_or_path if tokenizer_name_or_path is not None else model_name_or_path, cache_dir=cache_dir, **tokenizer_args)
-
-        print(self.auto_model.config.output_hidden_states)
 
         # No max_seq_length set. Try to infer from model
         if max_seq_length is None:

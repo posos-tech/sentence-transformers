@@ -94,7 +94,8 @@ class Pooling(nn.Module):
             max_over_time = torch.max(token_embeddings, 1)[0]
             output_vectors.append(max_over_time)
         if self.pooling_mode_mean_tokens or self.pooling_mode_mean_sqrt_len_tokens:
-            if not self.need_hidden_states:
+            # if we are in training, we don't want to pull from different layers
+            if self.training or not self.need_hidden_states:
                 input_mask_expanded = attention_mask.unsqueeze(
                     -1).expand(token_embeddings.size()).float()
                 sum_embeddings = torch.sum(
@@ -107,6 +108,7 @@ class Pooling(nn.Module):
                 else:
                     sum_mask = input_mask_expanded.sum(1)
 
+            # if we are in eval and we want to pull from multiple layers, then we do it
             else:
                 hidden_states = features["all_layer_embeddings"]
                 hidden_states = torch.stack(
