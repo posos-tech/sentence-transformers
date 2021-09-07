@@ -118,7 +118,9 @@ class SentenceTransformer(nn.Sequential):
                convert_to_numpy: bool = True,
                convert_to_tensor: bool = False,
                device: str = None,
-               normalize_embeddings: bool = False) -> Union[List[Tensor], ndarray, Tensor]:
+               normalize_embeddings: bool = False,
+               is_query: bool = None,
+               output_tokens: bool = False) -> Union[List[Tensor], ndarray, Tensor]:
         """
         Computes sentence embeddings
 
@@ -144,7 +146,7 @@ class SentenceTransformer(nn.Sequential):
 
         if output_value == 'token_embeddings':
             convert_to_tensor = False
-            convert_to_numpy = False
+            #convert_to_numpy = False
 
         input_was_string = False
         # Cast an individual sentence to a list with length 1
@@ -158,41 +160,58 @@ class SentenceTransformer(nn.Sequential):
         self.to(device)
 
         all_embeddings = []
+        if output_tokens :
+            all_tokens = []
         length_sorted_idx = np.argsort(
             [-self._text_length(sen) for sen in sentences])
         sentences_sorted = [sentences[idx] for idx in length_sorted_idx]
 
         for start_index in trange(0, len(sentences), batch_size, desc="Batches", disable=not show_progress_bar):
             sentences_batch = sentences_sorted[start_index:start_index+batch_size]
-            features = self.tokenize(sentences_batch)
+            features = self.tokenize(sentences_batch, is_query=is_query)
+            if output_tokens :
+                token_ids = features["input_ids"]
+                attention_mask = features["attention_mask"]
+                all_tokens.extend([self._first_module().tokenizer.convert_ids_to_tokens(torch.masked_select(token_ids[idx], attention_mask[idx]==1)) for idx in range(len(token_ids))])
             features = batch_to_device(features, device)
 
             with torch.no_grad():
                 out_features = self.forward(features)
-
                 if output_value == 'token_embeddings':
                     embeddings = []
                     for token_emb, attention in zip(out_features[output_value], out_features['attention_mask']):
+                        '''
                         last_mask_id = len(attention)-1
                         while last_mask_id > 0 and attention[last_mask_id].item() == 0:
                             last_mask_id -= 1
+                        '''
+                        if normalize_embeddings:
+                            token_emb = torch.nn.functional.normalize(token_emb, p=2, dim=-1)
+                        token_emb = token_emb[attention]
+                        if convert_to_numpy :
+                            token_emb = token_emb.cpu()
+                        
+                        embeddings.append(token_emb)
+                        #embeddings.append(token_emb[0:last_mask_id+1])
 
-                        embeddings.append(token_emb[0:last_mask_id+1])
                 else:  # Sentence embeddings
                     embeddings = out_features[output_value]
                     embeddings = embeddings.detach()
                     if normalize_embeddings:
                         embeddings = torch.nn.functional.normalize(
-                            embeddings, p=2, dim=1)
+                            embeddings, p=2, dim=-1)
 
                     # fixes for #522 and #487 to avoid oom problems on gpu with large datasets
                     if convert_to_numpy:
                         embeddings = embeddings.cpu()
 
                 all_embeddings.extend(embeddings)
+                
 
         all_embeddings = [all_embeddings[idx]
                           for idx in np.argsort(length_sorted_idx)]
+        if output_tokens :
+            all_tokens = [all_tokens[idx] for idx in np.argsort(length_sorted_idx)]
 
         if convert_to_tensor:
             all_embeddings = torch.stack(all_embeddings)
@@ -202,6 +221,11 @@ class SentenceTransformer(nn.Sequential):
 
         if input_was_string:
             all_embeddings = all_embeddings[0]
+            if output_tokens :
+                all_tokens = all_tokens[0]
+
+        if output_tokens :
+            return all_embeddings, all_tokens
 
         return all_embeddings
 
@@ -316,11 +340,14 @@ class SentenceTransformer(nn.Sequential):
 
         return None
 
-    def tokenize(self, texts: Union[List[str], List[Dict], List[Tuple[str, str]]]):
+    def tokenize(self, texts: Union[List[str], List[Dict], List[Tuple[str, str]]], is_query=None):
         """
         Tokenizes the texts
         """
-        return self._first_module().tokenize(texts)
+        if is_query is not None :
+            return self._first_module().tokenize(texts, is_query=is_query)
+        else :
+            return self._first_module().tokenize(texts)
 
     def get_sentence_features(self, *features):
         return self._first_module().get_sentence_features(*features)
@@ -559,7 +586,10 @@ class SentenceTransformer(nn.Sequential):
 
         sentence_features = []
         for idx in range(num_texts):
-            tokenized = self.tokenize(texts[idx])
+            try :
+                tokenized = self.tokenize(texts[idx], is_query=idx==0)
+            except :
+                tokenized = self.tokenize(texts[idx])
             batch_to_device(tokenized, self._target_device)
             sentence_features.append(tokenized)
 
