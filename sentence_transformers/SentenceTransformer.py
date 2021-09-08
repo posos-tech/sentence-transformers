@@ -187,7 +187,9 @@ class SentenceTransformer(nn.Sequential):
                         '''
                         if normalize_embeddings:
                             token_emb = torch.nn.functional.normalize(token_emb, p=2, dim=-1)
-                        token_emb = token_emb[attention]
+                        
+                        token_emb = token_emb[torch.nonzero(attention)].squeeze(-2)
+
                         if convert_to_numpy :
                             token_emb = token_emb.cpu()
                         

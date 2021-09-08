@@ -35,8 +35,15 @@ class LinearReduction(nn.Module):
         if self.normalize :
             token_embeddings = torch.nn.functional.normalize(token_embeddings, p=2, dim=-1)
 
-        features.update({'token_embeddings': token_embeddings})
+        cls_tokens = token_embeddings[:, 0, :]
+
+        features.update({'token_embeddings': token_embeddings, "cls_tokens":cls_tokens})
+
+
         return features
+
+    def get_word_embedding_dimension(self):
+        return self.output_word_dimension
 
     def get_sentence_embedding_dimension(self):
         return self.output_word_dimension

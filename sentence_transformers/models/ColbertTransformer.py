@@ -12,7 +12,7 @@ from BertBase.SentenceTransfo.Whitening_helpers.whithen_utils import compute_ker
 
 
 class ColbertTransformer(models.Transformer):
-    def __init__(self, query_maxlen, doc_maxlen, input_path, filter_punctuation=False):
+    def __init__(self, query_maxlen, doc_maxlen, input_path, filter_punctuation=False, filter_2_first_tokens=False):
         # Loading previous model Bert
         for config_name in ['sentence_bert_config.json', 'sentence_roberta_config.json', 'sentence_distilbert_config.json', 'sentence_camembert_config.json', 'sentence_albert_config.json', 'sentence_xlm-roberta_config.json', 'sentence_xlnet_config.json']:
             sbert_config_path = os.path.join(input_path, config_name)
@@ -32,6 +32,7 @@ class ColbertTransformer(models.Transformer):
 
         self.config_keys = ['max_seq_length', 'query_maxlen', 'doc_maxlen', 'do_lower_case']
 
+        self.filter_2_first_tokens = filter_2_first_tokens
         self.filter_punctuation = filter_punctuation
         self.instantiate_for_tokenizer()
         
@@ -50,8 +51,8 @@ class ColbertTransformer(models.Transformer):
             punctuations = string.punctuation
             for p in punctuations:
                 list_tokens.append(self.tokenizer.convert_tokens_to_ids(p))
-
-        self.punctuation_tokens = torch.tensor(list_tokens)
+            
+            self.punctuation_tokens = torch.tensor(list_tokens)
 
 
     def __repr__(self):
@@ -98,7 +99,9 @@ class ColbertTransformer(models.Transformer):
         else :
             ids[:, 1] = self.D_marker_token_id
 
-        obj['attention_mask'][:,:2] = 0   # we won't compute maxsim from the two first tokens
+        if self.filter_2_first_tokens :
+            obj['attention_mask'][:,:2] = 0   # we won't compute maxsim from the two first tokens
+
         obj['input_ids'] = ids
 
         if self.filter_punctuation:
