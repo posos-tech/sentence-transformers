@@ -636,7 +636,8 @@ class SentenceTransformer(nn.Sequential):
             checkpoint_save_steps: int = 500,
             checkpoint_save_total_limit: int = 1,
             # CUTSOMCHANGE
-            step_callback: Callable[[int, float], None] = None
+            step_callback: Callable[[int, float], None] = None,
+            accum_step: int = 1
             ):
         """
         Train the model with the given training objective
@@ -763,24 +764,28 @@ class SentenceTransformer(nn.Sequential):
 
                         scale_before_step = scaler.get_scale()
                         scaler.scale(loss_value).backward()
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(
-                            loss_model.parameters(), max_grad_norm)
-                        scaler.step(optimizer)
-                        scaler.update()
-
+                        if (training_steps + 1) % accum_step==0 :
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(
+                                loss_model.parameters(), max_grad_norm)
+                            scaler.step(optimizer)
+                            scaler.update()
+                            
                         skip_scheduler = scaler.get_scale() != scale_before_step
+                        
                     else:
                         loss_value = loss_model(features, labels)
+                        loss_value /= accum_step
                         loss_value.backward()
-                        torch.nn.utils.clip_grad_norm_(
-                            loss_model.parameters(), max_grad_norm)
-                        optimizer.step()
+                        if (training_steps + 1) % accum_step==0 :
+                            torch.nn.utils.clip_grad_norm_(
+                                loss_model.parameters(), max_grad_norm)
+                            optimizer.step()
 
-                    optimizer.zero_grad()
-
-                    if not skip_scheduler:
-                        scheduler.step()
+                    if (training_steps + 1) % accum_step==0 :
+                        optimizer.zero_grad()
+                        if not skip_scheduler:
+                            scheduler.step()
 
                 training_steps += 1
                 global_step += 1

@@ -12,7 +12,7 @@ from BertBase.SentenceTransfo.Whitening_helpers.whithen_utils import compute_ker
 
 
 class ColbertTransformer(models.Transformer):
-    def __init__(self, query_maxlen, doc_maxlen, input_path, filter_punctuation=False, filter_2_first_tokens=False):
+    def __init__(self, query_maxlen, doc_maxlen, input_path, add_special_tokens=False, filter_punctuation=False, filter_2_first_tokens=False):
         # Loading previous model Bert
         for config_name in ['sentence_bert_config.json', 'sentence_roberta_config.json', 'sentence_distilbert_config.json', 'sentence_camembert_config.json', 'sentence_albert_config.json', 'sentence_xlm-roberta_config.json', 'sentence_xlnet_config.json']:
             sbert_config_path = os.path.join(input_path, config_name)
@@ -34,9 +34,9 @@ class ColbertTransformer(models.Transformer):
 
         self.filter_2_first_tokens = filter_2_first_tokens
         self.filter_punctuation = filter_punctuation
+        self.add_special_tokens = add_special_tokens
         self.instantiate_for_tokenizer()
         
-
 
     def instantiate_for_tokenizer(self):
         self.Q_marker_token, self.Q_marker_token_id = '[Q]', self.tokenizer.convert_tokens_to_ids('[unused0]')
@@ -74,10 +74,8 @@ class ColbertTransformer(models.Transformer):
         # Lowercase
         if self.do_lower_case:
             to_tokenize = [[s.lower() for s in col] for col in to_tokenize]
-
-        to_tokenize = [['. ' + s for s in col] for col in to_tokenize]
-
-        if is_query is not None :
+            
+        if is_query is not None:
             out_tok = self.tokenize_given_type(to_tokenize, is_query)
             output.update(out_tok)
         else :
@@ -87,26 +85,33 @@ class ColbertTransformer(models.Transformer):
         return output
     
     def tokenize_given_type(self, to_tokenize, is_query):
-        obj = self.tokenizer(*to_tokenize, padding='max_length' if is_query else 'longest', truncation=True if is_query else 'longest_first',
-                    return_tensors='pt', max_length=self.query_maxlen if is_query else self.doc_maxlen)
+        if self.add_special_tokens:
+            to_tokenize = [['. ' + s for s in col] for col in to_tokenize]
+            obj = self.tokenizer(*to_tokenize, padding='max_length' if is_query else 'longest', truncation=True if is_query else 'longest_first',
+                        return_tensors='pt', max_length=self.query_maxlen if is_query else self.doc_maxlen)
 
-        ids = obj['input_ids']
+            ids = obj['input_ids']
 
-        if is_query :
-            ids[:, 1] = self.Q_marker_token_id
-            ids[ids == 0] = self.mask_token_id
-            obj['attention_mask'][obj['attention_mask']==0] = 1
+            if is_query :
+                ids[:, 1] = self.Q_marker_token_id
+                ids[ids == 0] = self.mask_token_id
+                obj['attention_mask'][obj['attention_mask']==0] = 1
+            else :
+                ids[:, 1] = self.D_marker_token_id
+
+            if self.filter_2_first_tokens :
+                obj['attention_mask'][:,:2] = 0   # we won't compute maxsim from the two first tokens
+
+            obj['input_ids'] = ids
+
+            if self.filter_punctuation:
+                for id_punct in self.punctuation_tokens:
+                    obj['attention_mask'][ids==id_punct] = 0
         else :
-            ids[:, 1] = self.D_marker_token_id
-
-        if self.filter_2_first_tokens :
-            obj['attention_mask'][:,:2] = 0   # we won't compute maxsim from the two first tokens
-
-        obj['input_ids'] = ids
-
-        if self.filter_punctuation:
-            for id_punct in self.punctuation_tokens:
-                obj['attention_mask'][ids==id_punct] = 0
+            obj = self.tokenizer(*to_tokenize, padding=True, truncation='longest_first',
+                      return_tensors="pt", max_length=self.max_seq_length)
+                      
+        obj.update({"is_query": is_query})
         
         return obj
 
