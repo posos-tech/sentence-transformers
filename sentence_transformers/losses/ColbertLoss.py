@@ -42,7 +42,6 @@ class ColbertLoss(nn.Module):
             cosines_pos = F.cosine_similarity(q_features["sentence_embedding"], dpos_features["sentence_embedding"])
             cosines_neg = F.cosine_similarity(q_features["sentence_embedding"], dneg_features["sentence_embedding"])
         '''
-
         #else :
         q_features_post_treated = self.post_treat_emb(q_features["token_embeddings"], q_features["attention_mask"])
         dpos_features_post_treated = self.post_treat_emb(dpos_features["token_embeddings"], dpos_features["attention_mask"])
