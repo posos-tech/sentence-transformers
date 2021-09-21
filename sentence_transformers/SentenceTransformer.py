@@ -772,20 +772,21 @@ class SentenceTransformer(nn.Sequential):
                             scaler.update()
                             
                         skip_scheduler = scaler.get_scale() != scale_before_step
+                        if (training_steps + 1) % accum_step==0 :
+                            optimizer.zero_grad()
+                            if not skip_scheduler:
+                                scheduler.step()
                         
                     else:
                         loss_value = loss_model(features, labels)
                         loss_value /= accum_step
                         loss_value.backward()
                         if (training_steps + 1) % accum_step==0 :
+                            logging.info("Optimizer step")
                             torch.nn.utils.clip_grad_norm_(
                                 loss_model.parameters(), max_grad_norm)
                             optimizer.step()
-
-                    if (training_steps + 1) % accum_step==0 :
-                        optimizer.zero_grad()
-                        if not skip_scheduler:
-                            scheduler.step()
+                            optimizer.zero_grad()                        
 
                 training_steps += 1
                 global_step += 1
