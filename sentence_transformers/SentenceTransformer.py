@@ -782,7 +782,6 @@ class SentenceTransformer(nn.Sequential):
                         loss_value /= accum_step
                         loss_value.backward()
                         if (training_steps + 1) % accum_step==0 :
-                            logging.info("Optimizer step")
                             torch.nn.utils.clip_grad_norm_(
                                 loss_model.parameters(), max_grad_norm)
                             optimizer.step()
